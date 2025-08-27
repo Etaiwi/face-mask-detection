@@ -15,6 +15,7 @@ import hashlib
 
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 
+
 def iter_images(root: Path) -> Iterable[Path]:
     """
     Yield image file paths under 'root' (recursive) with allowed extensions.
@@ -23,6 +24,7 @@ def iter_images(root: Path) -> Iterable[Path]:
     for p in root.rglob("*"):
         if p.is_file() and p.suffix.lower() in IMG_EXTS:
             yield p
+
 
 def check_image_ok(p: Path) -> bool:
     """
@@ -40,6 +42,7 @@ def check_image_ok(p: Path) -> bool:
         # Any problem (unsupported format, truncated, corrupt) → not OK
         return False
     
+
 def inventory(root: Path) -> dict[str, int]:
     """
     Count images by parent folder name under root.
@@ -51,6 +54,7 @@ def inventory(root: Path) -> dict[str, int]:
         counts[cls] = counts.get(cls, 0) + 1
     return counts
 
+
 def print_summary(title: str, counts: dict[str, int]) -> None:
     """
     Print a summary of counts with a title and total.
@@ -59,6 +63,7 @@ def print_summary(title: str, counts: dict[str, int]) -> None:
     print(f"\n{title} (total={total})")
     for k in sorted(counts):
         print(f"  {k:>12}: {counts[k]}")
+
 
 def file_hash(p: Path, algo: str = "md5", block_size: int = 1 << 20) -> str:
     """
@@ -74,6 +79,7 @@ def file_hash(p: Path, algo: str = "md5", block_size: int = 1 << 20) -> str:
             h.update(chunk)
     return h.hexdigest()
 
+
 def find_duplicates(root: Path) -> dict[str, list[Path]]:
     """
     Return dict: {hash: [paths...]} for any hash that appears 2+ times.
@@ -86,6 +92,7 @@ def find_duplicates(root: Path) -> dict[str, list[Path]]:
     # keep only groups with 2+ files
     dupes = {h: paths for h, paths in groups.items() if len(paths) > 1}
     return dupes
+
 
 def size_stats(root: Path) -> Dict[str, Tuple[int, int, int, int]]:
     """
