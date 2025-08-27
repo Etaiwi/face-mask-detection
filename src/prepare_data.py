@@ -88,22 +88,56 @@ def build_working_copy(raw_root: Path, work_root: Path) -> None:
     print(f"Done. Total={n_total:,} | kept={n_ok:,} | dupes={n_dupe:,} | bad={n_bad:,} | outside_class={n_outside:,}")
 
 
-
 def split_sets(work_root: Path) -> dict[str, list[Path]]:
     """
-    Random split into train/val/test (80/10/10).
+    Random split into train/val/test (80/10/10), stratified by class.
     Returns dict: {split_name: [image_paths]}.
     """
-    # TODO: implement
-    return {}
+    random.seed(RNG_SEED)
+    splits: dict[str, list[Path]] = {"train": [], "val": [], "test": []}
+
+    for cls in CLASSES:
+        cls_dir = Path(work_root) / cls
+        files = list(iter_images(cls_dir))
+        # Reproducible shuffle per class keeps class balance in each split
+        random.shuffle(files)
+
+        n = len(files)
+        n_train = int(0.8 * n)
+        n_val = int(0.1 * n)
+        n_test = n - (n_train + n_val)  # whatever remains
+
+        splits["train"].extend(files[:n_train])
+        splits["val"].extend(files[n_train:n_train + n_val])
+        splits["test"].extend(files[n_train + n_val:])
+
+    return splits
 
 
 def materialize_splits(splits: dict[str, list[Path]], out_dirs: dict[str, Path]) -> None:
     """
     Copy files into train/val/test/<class>/ directories.
+    Avoid overwriting by appending a short hash to the name on collision.
     """
-    # TODO: implement
-    pass
+    # Ensure destination dirs exist
+    for split, out_root in out_dirs.items():
+        for cls in CLASSES:
+            (out_root / cls).mkdir(parents=True, exist_ok=True)
+
+    for split, files in splits.items():
+        out_root = out_dirs[split]
+        for src in files:
+            cls = src.parent.name
+            dst = out_root / cls / src.name
+
+            if dst.exists():
+                # Disambiguate file name within the split/class folder
+                stem, suffix = src.stem, src.suffix.lower()
+                # Use a stable short hash derived from the full path string
+                short_id = f"{abs(hash(str(src))) % (10**8):08d}"
+                dst = out_root / cls / f"{stem}_{short_id}{suffix}"
+
+            shutil.copy2(src, dst)
 
 
 def main() -> int:
