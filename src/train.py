@@ -103,6 +103,7 @@ def build_loaders(
 
     return train_loader, val_loader
 
+
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Train baseline face-mask classifier")
@@ -117,6 +118,7 @@ def build_argparser() -> argparse.ArgumentParser:
     return p
 
 
+# ---- main ----
 def main(argv: list[str] | None = None) -> int:
     args = build_argparser().parse_args(argv)
 
