@@ -15,9 +15,9 @@ import random
 import sys
 
 import torch
-
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
+import torch.nn as nn
+from torchvision import datasets, transforms, models
 
 
 # ---- config / paths ----
@@ -104,6 +104,26 @@ def build_loaders(
     return train_loader, val_loader
 
 
+# ---- model ----
+def build_model(num_classes: int = 2, freeze_backbone: bool = False) -> torch.nn.Module:
+    """
+    Load pretrained MobileNetV2 and replace the classifier head for num_classes.
+    Optionally freeze the backbone (feature extractor).
+    """
+    # weights are name depends on torchvision version; this works for 0.13+
+    model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.DEFAULT)
+
+    #in_features = last layer input size (1280 for MobileNetV2)
+    in_features = model.classifier[-1].in_features
+    model.classifier[-1] = nn.Linear(in_features, num_classes)
+
+    if freeze_backbone:
+        for p in model.features.parameters():
+            p.requires_grad = False
+    
+    return model
+
+
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Train baseline face-mask classifier")
@@ -139,6 +159,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"batches | train: {len(train_loader)} val: {len(val_loader)}")
 
     # step 2.2: model (mobilenetv2), optionally freeze backbone
+    model = build_model(num_classes=len(CLASSES), freeze_backbone=args.freeze_backbone)
+    print(model.classifier[-1])  # print new head
+
     # step 2.3: loss/optim/scheduler
     # step 2.4: training loop (track acc/F1, save best)
     # step 2.5: final summary
