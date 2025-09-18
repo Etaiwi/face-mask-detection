@@ -15,6 +15,7 @@ import random
 import sys
 import numpy as np
 import time
+import json
 
 import torch
 from torch.utils.data import DataLoader
@@ -22,6 +23,10 @@ import torch.nn as nn
 from torchvision import datasets, transforms, models
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+from tqdm import tqdm
+
+import warnings; warnings.filterwarnings("ignore", message="Palette images with Transparency")
 
 
 # ---- config / paths ----
@@ -110,11 +115,7 @@ def build_loaders(
 
 # ---- model ----
 def build_model(num_classes: int = 2, freeze_backbone: bool = False) -> torch.nn.Module:
-    """
-    Load pretrained MobileNetV2 and replace the classifier head for num_classes.
-    Optionally freeze the backbone (feature extractor).
-    """
-    # weights are name depends on torchvision version; this works for 0.13+
+    """ Load pretrained MobileNetV2 and replace the classifier head for num_classes. """
     model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.DEFAULT)
 
     #in_features = last layer input size (1280 for MobileNetV2)
@@ -183,14 +184,31 @@ def f1_macro_from_counts(y_true: list[int], y_pred: list[int]) -> float:
         fn = ((y_true == c) & (y_pred != c)).sum()
         prec = tp / (tp + fp) if (tp + fp) else 0.0
         rec = tp / (tp + fn) if (tp + fn) else 0.0
-        f1 = 2*prec*rec / (prec + rec) if (prec + rec) else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
         f1s.append(f1)
     return float(sum(f1s) / len(f1s))
 
 
+# ---- logging ----
+def write_csv_header(path: Path) -> None:
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            f.write("epoch,train_loss,train_acc,train_f1,val_loss,val_acc,val_f1,lr,time_s\n")
+
+
+def append_csv_row(path: Path, row: dict) -> None:
+    with path.open("a", encoding="utf-8") as f:
+        f.write(
+            f"{row['epoch']},{row['train_loss']:.6f},{row['train_acc']:.6f},{row['train_f1']:.6f},"
+            f"{row['val_loss']:.6f},{row['val_acc']:.6f},{row['val_f1']:.6f},"
+            f"{row['lr']:.2e},{row['time_s']:.3f}\n"
+        )
+
+
 # ---- loops ----
 def train_one_epoch(
-        model: torch.nn.Module,
+        model: nn.Module,
         loader: DataLoader,
         criterion: nn.Module,
         optimizer: Adam,
@@ -201,7 +219,9 @@ def train_one_epoch(
     correct, total = 0, 0
     y_true, y_pred = [], []
 
-    for xb, yb in loader:
+    iterator = tqdm(loader, desc="train", leave=False)
+
+    for xb, yb in iterator:
         # move batch to device (GPU/CPU)
         xb = xb.to(dev, non_blocking=True)
         yb = yb.to(dev, non_blocking=True)
@@ -280,22 +300,6 @@ def evaluate(
     return {"loss": avg_loss, "acc": acc, "f1": f1}
 
 
-# ---- io / logging ----
-def args_to_dict(args) -> dict:
-    return {
-        "epochs": args.epochs,
-        "batch_size": args.batch_size,
-        "lr": args.lr,
-        "num_workers": args.num_workers,
-        "train_dir": str(args.train_dir),
-        "val_dir": str(args.val_dir),
-        "out": str(args.out),
-        "freeze_backbone": args.freeze_backbone,
-        "img_size": IMG_SIZE,
-        "classes": CLASSES,
-    }
-
-
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Train baseline face-mask classifier")
@@ -307,7 +311,6 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--val-dir", type=Path, default=VAL_DIR)
     p.add_argument("--out", type=Path, default=MODELS_DIR / "best_mobilenetv2.pt")
     p.add_argument("--freeze-backbone", action="store_true")
-    p.add_argument("--config-out", type=Path, default=MODELS_DIR / "config.json")
     p.add_argument("--log-csv", type=Path, default=MODELS_DIR / "train_log.csv")
     return p
 
@@ -340,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     model = model.to(dev)
     print("model device:", next(model.parameters()).device)
 
-    # 3) optim pieces
+    # 3) optim
     criterion = build_criterion()
     optimizer = build_optimizer(model, lr=args.lr)
     scheduler = build_scheduler(optimizer)
@@ -349,25 +352,37 @@ def main(argv: list[str] | None = None) -> int:
     n_total = sum(p.numel() for p in model.parameters())
     print(f"params | trainable: {n_trainable:,} / total: {n_total:,}")
 
-    # 4) training loop
+    # 4) training
     best_f1 = -1.0
     for epoch in range(args.epochs):
-        start = time.time() # start timer
+        start = time.time()
 
         train_metrics = train_one_epoch(model, train_loader, criterion, optimizer, dev)
         val_metrics = evaluate(model, val_loader, criterion, dev)
 
         # scheduler uses val F1
         scheduler.step(val_metrics["f1"])
-        print(f"lr now: {current_lr(optimizer):.2e}")
+        elapsed = time.time() - start
 
         # save best
         if val_metrics["f1"] > best_f1:
             best_f1 = val_metrics["f1"]
             torch.save(model.state_dict(), args.out)
 
-        elapsed = time.time() - start # end timer
+        # save CSV row
+        append_csv_row(args.log_csv, {
+            "epoch": epoch + 1,
+            "train_loss": train_metrics["loss"],
+            "train_acc": train_metrics["acc"],
+            "train_f1": train_metrics["f1"],
+            "val_loss": val_metrics["loss"],
+            "val_acc": val_metrics["acc"],
+            "val_f1": val_metrics["f1"],
+            "lr": current_lr(optimizer),
+            "time_s": elapsed,
+        })
 
+        # console summary
         print(
             f"epoch {epoch+1:03d}/{args.epochs} | "
             f"train loss {train_metrics['loss']:.4f} acc {train_metrics['acc']:.3f} f1 {train_metrics['f1']:.3f} | "
