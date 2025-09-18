@@ -13,6 +13,8 @@ from pathlib import Path
 import argparse
 import random
 import sys
+import numpy as np
+import time
 
 import torch
 from torch.utils.data import DataLoader
@@ -20,7 +22,7 @@ import torch.nn as nn
 from torchvision import datasets, transforms, models
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-
+import torch.nn.functional as F
 
 # ---- config / paths ----
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,12 +130,12 @@ def build_model(num_classes: int = 2, freeze_backbone: bool = False) -> torch.nn
 
 # ---- optim ----
 def build_criterion() -> nn.Module:
-    """Mulit-class classification loss."""
+    """ Mulit-class classification loss. """
     return nn.CrossEntropyLoss()
 
 
 def build_optimizer(model: nn.Module, lr: float) -> Adam:
-    """Adam over trainable parameters only."""
+    """ Adam over trainable parameters only. """
     params = (p for p in model.parameters() if p.requires_grad)
     return Adam(params, lr=lr)
 
@@ -153,8 +155,129 @@ def build_scheduler(optimizer: Adam) -> ReduceLROnPlateau:
 
 
 def current_lr(optimizer: Adam) -> float:
-    """Get current learning rate from optimizer."""
+    """ Get current learning rate from optimizer. """
     return optimizer.param_groups[0]["lr"]
+
+
+# ---- metrics ----
+def batch_preds(logits: torch.Tensor) -> torch.Tensor:
+    """ logits: [B, 2] -> class indices [B]."""
+    return logits.argmax(dim=1)
+
+
+def update_running_counts(preds, targets, correct, total):
+    """ Update running counts for accuracy calculation. """
+    correct += (preds == targets).sum().item()
+    total += targets.numel()
+    return correct, total
+
+
+def f1_macro_from_counts(y_true: list[int], y_pred: list[int]) -> float:
+    """ Compute macro F1 from lists of true and predicted class indices."""
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    f1s = []
+    for c in [0, 1]:
+        tp = ((y_true == c) & (y_pred == c)).sum()
+        fp = ((y_true != c) & y_pred == c).sum()
+        fn = ((y_true == c) & (y_pred != c)).sum()
+        prec = tp / (tp + fp) if (tp + fp) else 0.0
+        rec = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = 2*prec*rec / (prec + rec) if (prec + rec) else 0.0
+        f1s.append(f1)
+    return float(sum(f1s) / len(f1s))
+
+
+# ---- loops ----
+def train_one_epoch(
+        model: torch.nn.Module,
+        loader: DataLoader,
+        criterion: nn.Module,
+        optimizer: Adam,
+        device: torch.device,
+) -> dict:
+    model.train()   # enable dropout/batchnorm updates
+    loss_sum = 0.0
+    correct, total = 0, 0
+    y_true, y_pred = [], []
+
+    for xb, yb in loader:
+        # move batch to device (GPU/CPU)
+        xb = xb.to(device, non_blocking=True)
+        yb = yb.to(device, non_blocking=True)
+
+        # clear previous gradients
+        optimizer.zero_grad(set_to_none=True)
+
+        # forward pass: logits [B, 2]
+        logits = model(xb)
+
+        # compute scalar loss for the batch
+        loss = criterion(logits, yb)
+
+        # backprop
+        loss.backward()
+
+        # update trainable parameters
+        optimizer.step()
+
+        # accumulate sum of per-sample losses
+        loss_sum += loss.item() * yb.size(0)
+
+        # predictions & running accuracy
+        preds = batch_preds(logits)
+        correct, total = update_running_counts(preds, yb, correct, total)
+
+        # collect for F1
+        y_true.extend(yb.detach().cpu().tolist())
+        y_pred.extend(preds.detach().cpu().tolist())
+
+    # epoch-level averages/metrics
+    avg_loss = loss_sum / max(total, 1)
+    acc = correct / max(total, 1)
+    f1 = f1_macro_from_counts(y_true, y_pred)
+    return {"loss": avg_loss, "acc": acc, "f1": f1}
+
+
+@torch.no_grad()
+def evaluate(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    criterion: torch.nn.Module,
+    device: torch.device,
+) -> dict:
+    model.eval()  # disable dropout/batchnorm updates
+    loss_sum = 0.0
+    correct, total = 0, 0
+    y_true, y_pred = [], []
+
+    for xb, yb in loader:
+        # move batch to device (GPU/CPU)
+        xb = xb.to(device, non_blocking=True)
+        yb = yb.to(device, non_blocking=True)
+
+        # forward pass: logits [B, 2]
+        logits = model(xb)
+
+        # compute scalar loss for the batch
+        loss = criterion(logits, yb)
+
+        # accumulate sum of per-sample losses
+        loss_sum += loss.item() * yb.size(0)
+
+        # predictions & running accuracy
+        preds = batch_preds(logits)
+        correct, total = update_running_counts(preds, yb, correct, total)
+
+        # collect for F1
+        y_true.extend(yb.detach().cpu().tolist())
+        y_pred.extend(preds.detach().cpu().tolist())
+
+    # epoch-level averages/metrics
+    avg_loss = loss_sum / max(total, 1)
+    acc = correct / max(total, 1)
+    f1 = f1_macro_from_counts(y_true, y_pred)
+    return {"loss": avg_loss, "acc": acc, "f1": f1}
 
 
 # ---- argparse ----
@@ -195,6 +318,9 @@ def main(argv: list[str] | None = None) -> int:
     model = build_model(num_classes=len(CLASSES), freeze_backbone=args.freeze_backbone)
     print(model.classifier[-1])  # print new head
 
+    mode = model.to(dev)
+    print("model device:", next(model.parameters()).device)
+
     # step 2.3: loss/optim/scheduler
     criterion = build_criterion()
     optimizer = build_optimizer(model, lr=args.lr)
@@ -205,6 +331,29 @@ def main(argv: list[str] | None = None) -> int:
     print(f"params | trainable: {n_trainable:,} / total: {n_total:,}")
 
     # step 2.4: training loop (track acc/F1, save best)
+    best_f1 = -1.0
+    for epoch in range(args.epochs):
+        start = time.time() # start timer
+        train_metrics = train_one_epoch(model, train_loader, criterion, optimizer, dev)
+        val_metrics = evaluate(model, val_loader, criterion, dev)
+        elapsed = time.time() - start # end timer
+
+    # scheduler uses val F1
+    scheduler.step(val_metrics["f1"])
+    print(f"lr now: {current_lr(optimizer):.2e}")
+
+    # save best
+    if val_metrics["f1"] > best_f1:
+        best_f1 = val_metrics["f1"]
+        torch.save(model.state_dict(), args.out)
+
+    print(
+        f"epcoch {epoch+1:03d}/{args.epochs} | "
+        f"train loss {train_metrics['loss']:.4f} acc {train_metrics['acc']:.3f} f1 {train_metrics['f1']:.3f} | "
+        f"val_loss {val_metrics['loss']:.4f} acc {val_metrics['acc']:.3f} f1 {val_metrics['f1']:.3f} | "
+        f"time {elapsed:.1f}s"
+    )
+
     # step 2.5: final summary
 
     return 0
