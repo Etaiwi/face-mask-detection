@@ -18,6 +18,8 @@ import torch
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from torchvision import datasets, transforms, models
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 # ---- config / paths ----
@@ -124,6 +126,35 @@ def build_model(num_classes: int = 2, freeze_backbone: bool = False) -> torch.nn
     return model
 
 
+# ---- optim ----
+def build_criterion() -> nn.Module:
+    """Mulit-class classification loss."""
+    return nn.CrossEntropyLoss()
+
+
+def build_optimizer(model: nn.Module, lr: float) -> Adam:
+    """Adam over trainable parameters only."""
+    params = (p for p in model.parameters() if p.requires_grad)
+    return Adam(params, lr=lr)
+
+def build_scheduler(optimizer: Adam) -> ReduceLROnPlateau:
+    """
+    Reduce LR when a metric has stopped improving.
+    Call scheduler.step(val_f1) after each epoch.
+    """
+    return ReduceLROnPlateau(
+        optimizer,
+        mode="max",     # maximizing F1
+        factor=0.5,     # halves LR on plateau
+        patience=2,     # wait 2 epochs without improvement
+        min_lr=1e-6,
+    )
+
+
+def current_lr(optimizer: Adam) -> float:
+    """Get current learning rate from optimizer."""
+    return optimizer.param_groups[0]["lr"]
+
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Train baseline face-mask classifier")
@@ -163,6 +194,14 @@ def main(argv: list[str] | None = None) -> int:
     print(model.classifier[-1])  # print new head
 
     # step 2.3: loss/optim/scheduler
+    criterion = build_criterion()
+    optimizer = build_optimizer(model, lr=args.lr)
+    scheduler = build_scheduler(optimizer)
+
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_total = sum(p.numel() for p in model.parameters())
+    print(f"params | trainable: {n_trainable:,} / total: {n_total:,}")
+
     # step 2.4: training loop (track acc/F1, save best)
     # step 2.5: final summary
 
