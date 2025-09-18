@@ -137,6 +137,7 @@ def build_optimizer(model: nn.Module, lr: float) -> Adam:
     params = (p for p in model.parameters() if p.requires_grad)
     return Adam(params, lr=lr)
 
+
 def build_scheduler(optimizer: Adam) -> ReduceLROnPlateau:
     """
     Reduce LR when a metric has stopped improving.
@@ -154,6 +155,7 @@ def build_scheduler(optimizer: Adam) -> ReduceLROnPlateau:
 def current_lr(optimizer: Adam) -> float:
     """Get current learning rate from optimizer."""
     return optimizer.param_groups[0]["lr"]
+
 
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
