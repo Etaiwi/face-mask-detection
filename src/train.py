@@ -22,7 +22,7 @@ import torch.nn as nn
 from torchvision import datasets, transforms, models
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-import torch.nn.functional as F
+
 
 # ---- config / paths ----
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,7 +37,6 @@ CLASSES = ["with_mask", "without_mask"]
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 IMG_SIZE = 224
-
 SEED = 42
 
 
@@ -60,6 +59,7 @@ def build_transforms(img_size: int = IMG_SIZE):
     Val: deterministic transform + normalize.
     """
     train_tfms = transforms.Compose([
+        transforms.Lambda(lambda im: im.convert("RGB")),
         transforms.Resize((img_size, img_size)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.ToTensor(),
@@ -67,6 +67,7 @@ def build_transforms(img_size: int = IMG_SIZE):
     ])
 
     val_tfms = transforms.Compose([
+        transforms.Lambda(lambda im: im.convert("RGB")),
         transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),
         transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
@@ -86,8 +87,7 @@ def build_loaders(
     train_ds = datasets.ImageFolder(train_dir, transform=train_tfms)
     val_ds = datasets.ImageFolder(val_dir, transform=val_tfms)
 
-    # On CUDA, pin_memory can speed up host-->GPU copies
-    pin = (dev.type == "cuda")
+    pin = (dev.type == "cuda")  # on CUDA, pin_memory can speed up host-->GPU copies
 
     train_loader = DataLoader(
         train_ds,
@@ -130,7 +130,7 @@ def build_model(num_classes: int = 2, freeze_backbone: bool = False) -> torch.nn
 
 # ---- optim ----
 def build_criterion() -> nn.Module:
-    """ Mulit-class classification loss. """
+    """ Multi-class classification loss. """
     return nn.CrossEntropyLoss()
 
 
@@ -179,7 +179,7 @@ def f1_macro_from_counts(y_true: list[int], y_pred: list[int]) -> float:
     f1s = []
     for c in [0, 1]:
         tp = ((y_true == c) & (y_pred == c)).sum()
-        fp = ((y_true != c) & y_pred == c).sum()
+        fp = ((y_true != c) & (y_pred == c)).sum()
         fn = ((y_true == c) & (y_pred != c)).sum()
         prec = tp / (tp + fp) if (tp + fp) else 0.0
         rec = tp / (tp + fn) if (tp + fn) else 0.0
@@ -194,7 +194,7 @@ def train_one_epoch(
         loader: DataLoader,
         criterion: nn.Module,
         optimizer: Adam,
-        device: torch.device,
+        dev: torch.device,
 ) -> dict:
     model.train()   # enable dropout/batchnorm updates
     loss_sum = 0.0
@@ -203,8 +203,8 @@ def train_one_epoch(
 
     for xb, yb in loader:
         # move batch to device (GPU/CPU)
-        xb = xb.to(device, non_blocking=True)
-        yb = yb.to(device, non_blocking=True)
+        xb = xb.to(dev, non_blocking=True)
+        yb = yb.to(dev, non_blocking=True)
 
         # clear previous gradients
         optimizer.zero_grad(set_to_none=True)
@@ -280,6 +280,22 @@ def evaluate(
     return {"loss": avg_loss, "acc": acc, "f1": f1}
 
 
+# ---- io / logging ----
+def args_to_dict(args) -> dict:
+    return {
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "lr": args.lr,
+        "num_workers": args.num_workers,
+        "train_dir": str(args.train_dir),
+        "val_dir": str(args.val_dir),
+        "out": str(args.out),
+        "freeze_backbone": args.freeze_backbone,
+        "img_size": IMG_SIZE,
+        "classes": CLASSES,
+    }
+
+
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Train baseline face-mask classifier")
@@ -291,6 +307,8 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--val-dir", type=Path, default=VAL_DIR)
     p.add_argument("--out", type=Path, default=MODELS_DIR / "best_mobilenetv2.pt")
     p.add_argument("--freeze-backbone", action="store_true")
+    p.add_argument("--config-out", type=Path, default=MODELS_DIR / "config.json")
+    p.add_argument("--log-csv", type=Path, default=MODELS_DIR / "train_log.csv")
     return p
 
 
@@ -298,6 +316,7 @@ def build_argparser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_argparser().parse_args(argv)
 
+    # 0) sanity on dirs
     assert args.train_dir.exists(), f"missing: {args.train_dir}"
     assert args.val_dir.exists(), f"missing: {args.val_dir}"
 
@@ -305,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
     dev = device()
     print(f"device: {dev.type} | cuda: {torch.cuda.is_available()}")
 
-    # step 2.1: data transforms + dataloaders
+    # 1) data
     train_loader, val_loader = build_loaders(
         args.train_dir, args.val_dir,
         batch=args.batch_size,
@@ -314,14 +333,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"batches | train: {len(train_loader)} val: {len(val_loader)}")
 
-    # step 2.2: model (mobilenetv2), optionally freeze backbone
+    # 2) model
     model = build_model(num_classes=len(CLASSES), freeze_backbone=args.freeze_backbone)
     print(model.classifier[-1])  # print new head
 
-    mode = model.to(dev)
+    model = model.to(dev)
     print("model device:", next(model.parameters()).device)
 
-    # step 2.3: loss/optim/scheduler
+    # 3) optim pieces
     criterion = build_criterion()
     optimizer = build_optimizer(model, lr=args.lr)
     scheduler = build_scheduler(optimizer)
@@ -330,32 +349,34 @@ def main(argv: list[str] | None = None) -> int:
     n_total = sum(p.numel() for p in model.parameters())
     print(f"params | trainable: {n_trainable:,} / total: {n_total:,}")
 
-    # step 2.4: training loop (track acc/F1, save best)
+    # 4) training loop
     best_f1 = -1.0
     for epoch in range(args.epochs):
         start = time.time() # start timer
+
         train_metrics = train_one_epoch(model, train_loader, criterion, optimizer, dev)
         val_metrics = evaluate(model, val_loader, criterion, dev)
+
+        # scheduler uses val F1
+        scheduler.step(val_metrics["f1"])
+        print(f"lr now: {current_lr(optimizer):.2e}")
+
+        # save best
+        if val_metrics["f1"] > best_f1:
+            best_f1 = val_metrics["f1"]
+            torch.save(model.state_dict(), args.out)
+
         elapsed = time.time() - start # end timer
 
-    # scheduler uses val F1
-    scheduler.step(val_metrics["f1"])
-    print(f"lr now: {current_lr(optimizer):.2e}")
+        print(
+            f"epoch {epoch+1:03d}/{args.epochs} | "
+            f"train loss {train_metrics['loss']:.4f} acc {train_metrics['acc']:.3f} f1 {train_metrics['f1']:.3f} | "
+            f"val_loss {val_metrics['loss']:.4f} acc {val_metrics['acc']:.3f} f1 {val_metrics['f1']:.3f} | "
+            f"lr {current_lr(optimizer):.2e} | "
+            f"time {elapsed:.1f}s"
+        )
 
-    # save best
-    if val_metrics["f1"] > best_f1:
-        best_f1 = val_metrics["f1"]
-        torch.save(model.state_dict(), args.out)
-
-    print(
-        f"epcoch {epoch+1:03d}/{args.epochs} | "
-        f"train loss {train_metrics['loss']:.4f} acc {train_metrics['acc']:.3f} f1 {train_metrics['f1']:.3f} | "
-        f"val_loss {val_metrics['loss']:.4f} acc {val_metrics['acc']:.3f} f1 {val_metrics['f1']:.3f} | "
-        f"time {elapsed:.1f}s"
-    )
-
-    # step 2.5: final summary
-
+    print(f"best val F1: {best_f1:.3f} | saved to: {args.out}")
     return 0
 
 
