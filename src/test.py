@@ -2,17 +2,35 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
+import random
+import torch
+
 
 # ---- config / paths ----
-ROOT =Path(__file__).resolve().parents[1]  # repo root
+ROOT = Path(__file__).resolve().parents[1]  # repo root
 DATA = ROOT / "data"
 MODELS_DIR = ROOT / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 CLASSES = ["with_mask", "without_mask"]
 IMG_SIZE = 224
+SEED = 42
 
 
+# ---- runtime helpers ----
+def set_seed(seed: int = SEED) -> None:
+    """ Set RNG seeds for reproducibility"""
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def device() -> torch.device:
+    """ Get available device"""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+# ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Evaluate/Infer face-mask classifier")
     src = p.add_mutually_exclusive_group(required=True)
@@ -27,7 +45,20 @@ def build_argparser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_argparser().parse_args(argv)
+    parser = build_argparser()
+    args = parser.parse_args(argv)
+
+    if args.test_dir is not None and not args.test_dir.exists():
+        parser.error(f"--test-dir path does not exist: {args.test_dir}")
+    if args.images is not None and not args.images.exists():
+        parser.error(f"--images path does not exist: {args.images}")
+    if not args.weights.exists():
+        parser.error(f"--weights path does not exist: {args.weights}")
+
+    # seed + device
+    set_seed(SEED)
+    dev = device()
+    print(f"device: {dev.type}")
     
     # debug echo, remove at final version
     for k, v in vars(args).items():
