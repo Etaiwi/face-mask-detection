@@ -5,6 +5,8 @@ import sys
 import random
 import torch
 
+from models.factory import build_model
+
 
 # ---- config / paths ----
 ROOT = Path(__file__).resolve().parents[1]  # repo root
@@ -59,11 +61,17 @@ def main(argv: list[str] | None = None) -> int:
     set_seed(SEED)
     dev = device()
     print(f"device: {dev.type}")
-    
-    # debug echo, remove at final version
-    for k, v in vars(args).items():
-        print(f"{k} = {v}")
-    
+
+    # instantiate model
+    num_classes = len(args.classes)
+    model = build_model(num_classes=num_classes).to(dev)
+
+    # Optional, quick confidence print (keeps output minimal)
+    head = getattr(model, "classifier", None)
+    if head is not None:
+        print("model head:", head[-1])
+    print(f"num classes: {num_classes}")
+
     return 0
 
 
