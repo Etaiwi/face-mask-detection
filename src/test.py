@@ -32,6 +32,27 @@ def device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def load_weights(model: torch.nn.Module, pt_path: Path, map_location: str = "cpu") -> None:
+    """
+    Load a state_dict from a .pt/.ckpt file.
+    - Supports raw state_dict or wrapped {'state_dict': ...}
+    - Strips 'module.' prefixes (e.g., if trained with DataParallel)
+    - Loads with strict=False and surfaces any mismatches
+    """
+    pt = torch.load(pt_path, map_location=map_location)
+    state = pt.get("state_dict", pt)  # unwrap if needed
+
+    cleaned = {k.replace("module.", "", 1): v for k, v in state.items()}
+    result = model.load_state_dict(cleaned, strict=False)
+
+    missing = getattr(result, "missing_keys", [])
+    unexpected = getattr(result, "unexpected_keys", [])
+    if missing:
+        print(f"[warn] missing keys: {len(missing)} (first 5): {missing[:5]}")
+    if unexpected:
+        print(f"[warn] unexpected keys: {len(unexpected)} (first 5): {unexpected[:5]}")
+
+
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Evaluate/Infer face-mask classifier")
@@ -65,6 +86,10 @@ def main(argv: list[str] | None = None) -> int:
     # instantiate model
     num_classes = len(args.classes)
     model = build_model(num_classes=num_classes).to(dev)
+
+    # load weights
+    load_weights(model, args.weights, map_location=dev)
+    print(f"loaded weights from: {args.weights}")
 
     # Optional, quick confidence print (keeps output minimal)
     head = getattr(model, "classifier", None)
