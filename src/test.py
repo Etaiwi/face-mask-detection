@@ -6,6 +6,7 @@ import random
 import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+import numpy as np
 
 from models.factory import build_model
 
@@ -57,6 +58,35 @@ def load_weights(model: torch.nn.Module, pt_path: Path, map_location: str = "cpu
         print(f"[warn] unexpected keys: {len(unexpected)} (first 5): {unexpected[:5]}")
 
 
+# --- metrics ----
+def batch_preds(logits: torch.Tensor) -> torch.Tensor:
+    """ Convert model logits to predicted class indices. """
+    return logits.argmax(dim=1)
+
+
+def update_running_counts(preds, targets, correct, total):
+    """ Update running counts for accuracy calculation. """
+    correct += (preds == targets).sum().item()
+    total += targets.numel()
+    return correct, total
+
+
+def f1_macro_from_counts(y_true: list[int], y_pred: list[int]) -> float:
+    """ Compute macro F1 from lists of true and predicted class indices."""
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    f1s = []
+    for c in [0, 1]:
+        tp = ((y_true == c) & (y_pred == c)).sum()
+        fp = ((y_true != c) & (y_pred == c)).sum()
+        fn = ((y_true == c) & (y_pred != c)).sum()
+        prec = tp / (tp + fp) if (tp + fp) else 0.0
+        rec = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
+        f1s.append(f1)
+    return float(sum(f1s) / len(f1s))
+
+
 # ---- data ----
 def build_transforms(img_size: int = IMG_SIZE):
     """ Deterministic eval transforms: RGB -> resize -> tensor -> normalize. """
@@ -79,6 +109,29 @@ def build_loader(
     ds = datasets.ImageFolder(data_dir, transform=tfms)
     pin = (dev.type == "cuda")
     return DataLoader(ds, batch_size=batch, shuffle=False, num_workers=workers, pin_memory=pin)
+
+
+# ---- loops ----
+@torch.no_grad()
+def evaluate(model: torch.nn.Module, loader: DataLoader, dev: torch.device) -> dict:
+    model.eval()
+    correct, total = 0, 0
+    y_true, y_pred = [], []
+    for xb, yb in loader:
+        xb = xb.to(dev, non_blocking=True)
+        yb = yb.to(dev, non_blocking=True)
+
+        logits = model(xb)
+        preds = batch_preds(logits)
+
+        correct += (preds == yb).sum().item()
+        total   += yb.numel()
+        y_true.extend(yb.detach().cpu().tolist())
+        y_pred.extend(preds.detach().cpu().tolist())
+
+    acc = correct / max(total, 1)
+    f1  = f1_macro_from_counts(y_true, y_pred)  # import from utils or sklearn
+    return {"n": total, "acc": acc, "f1": f1}
 
 
 # ---- argparse ----
@@ -145,6 +198,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"test loader: {len(ds)} images | batch={args.batch_size} | xb={tuple(xb.shape)} yb={tuple(yb.shape)}")
     except StopIteration:
         print("[warn] test loader is empty (no images found).", file=sys.stderr)
+
+    if args.test_dir is not None:
+        loader = build_loader(args.test_dir, args.batch_size, args.num_workers, dev)
+        ds = loader.dataset
+        ds_classes = list(ds.classes)
+        if ds_classes != list(args.classes):
+            print("[warn] Dataset class order != --classes order", file=sys.stderr)
+            print(f"       dataset:   {ds_classes}", file=sys.stderr)
+            print(f"       --classes: {list(args.classes)}", file=sys.stderr)
+
+        # Run evaluation
+        metrics = evaluate(model, loader, dev)
+        print(f"eval: n={metrics['n']} | acc={metrics['acc']:.3f} | f1_macro={metrics['f1']:.3f}")
+
 
     return 0
 
