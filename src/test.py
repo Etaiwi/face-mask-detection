@@ -7,8 +7,11 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import numpy as np
+from PIL import Image
 
 from models.factory import build_model
+
+import warnings; warnings.filterwarnings("ignore", message="Palette images with Transparency")
 
 
 # ---- config / paths ----
@@ -111,6 +114,35 @@ def build_loader(
     return DataLoader(ds, batch_size=batch, shuffle=False, num_workers=workers, pin_memory=pin)
 
 
+class ImageFolderFlat(torch.utils.data.Dataset):
+    """
+    Walks all image files under a root directory (recursively) and returns:
+        (tensor_image, path_str)
+    """
+    exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+    def __init__(self, root: Path, transform):
+        self.root = Path(root)
+        self.transform = transform
+        self.files = [p for p in self.root.rglob("*") if p.suffix.lower() in self.exts]
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        path = self.files[idx]
+        img = Image.open(path)
+        img = self.transform(img)
+        return img, str(path)
+
+
+def build_infer_loader(images_dir: Path, batch: int, workers: int, dev: torch.device) -> DataLoader:
+    tfms = build_transforms(IMG_SIZE)  # reuse your eval transforms
+    ds = ImageFolderFlat(images_dir, transform=tfms)
+    pin = (dev.type == "cuda")
+    return DataLoader(ds, batch_size=batch, shuffle=False, num_workers=workers, pin_memory=pin)
+
+
 # ---- loops ----
 @torch.no_grad()
 def evaluate(model: torch.nn.Module, loader: DataLoader, dev: torch.device) -> dict:
@@ -134,6 +166,17 @@ def evaluate(model: torch.nn.Module, loader: DataLoader, dev: torch.device) -> d
     return {"n": total, "acc": acc, "f1": f1}
 
 
+@torch.no_grad()
+def infer_images(model: torch.nn.Module, loader: DataLoader, dev: torch.device, class_names: list[str]) -> None:
+    model.eval()
+    for xb, paths in loader:
+        xb = xb.to(dev, non_blocking=True)
+        logits = model(xb)                  # [B, C]
+        preds = logits.argmax(dim=1).tolist()
+        for p, path in zip(preds, paths):
+            print(f"{path} -> {class_names[p]}")
+
+
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Evaluate/Infer face-mask classifier")
@@ -153,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_argparser()
     args = parser.parse_args(argv)
 
+    # path checks
     if args.test_dir is not None and not args.test_dir.exists():
         parser.error(f"--test-dir path does not exist: {args.test_dir}")
     if args.images is not None and not args.images.exists():
@@ -165,53 +209,50 @@ def main(argv: list[str] | None = None) -> int:
     dev = device()
     print(f"device: {dev.type}")
 
-    # instantiate model
+    # model + weights
     num_classes = len(args.classes)
     model = build_model(num_classes=num_classes).to(dev)
-
-    # load weights
     load_weights(model, args.weights, map_location=dev)
     print(f"loaded weights from: {args.weights}")
 
-    # Optional, quick confidence print (keeps output minimal)
+    # head sanity
     head = getattr(model, "classifier", None)
     if head is not None:
         print("model head:", head[-1])
     print(f"num classes: {num_classes}")
 
-    # labeled eval path
+    # ----- labeled evaluation path -----
     if args.test_dir is not None:
         loader = build_loader(args.test_dir, args.batch_size, args.num_workers, dev)
-        ds = loader.dataset # ImageFolder
+        ds = loader.dataset  # ImageFolder
 
-    # Class order check
-    ds_classes = list(ds.classes)
-    if ds_classes != list(args.classes):
-        print("[warn] Dataset class order != --classes order", file=sys.stderr)
-        print(f"       dataset: {ds_classes}", file=sys.stderr)
-        print(f"       --classes: {list(args.classes)}", file=sys.stderr)
-        print("       (Make sure the index->label mapping matches training.)", file=sys.stderr)
-    
-    # One-batch dry pass: show shapes & dataset size
-    try:
-        xb, yb = next(iter(loader))
-        print(f"test loader: {len(ds)} images | batch={args.batch_size} | xb={tuple(xb.shape)} yb={tuple(yb.shape)}")
-    except StopIteration:
-        print("[warn] test loader is empty (no images found).", file=sys.stderr)
-
-    if args.test_dir is not None:
-        loader = build_loader(args.test_dir, args.batch_size, args.num_workers, dev)
-        ds = loader.dataset
+        # class-order check (dataset vs CLI)
         ds_classes = list(ds.classes)
         if ds_classes != list(args.classes):
             print("[warn] Dataset class order != --classes order", file=sys.stderr)
-            print(f"       dataset:   {ds_classes}", file=sys.stderr)
-            print(f"       --classes: {list(args.classes)}", file=sys.stderr)
+        print(f"       dataset:   {ds_classes}", file=sys.stderr)
+        print(f"       --classes: {list(args.classes)}", file=sys.stderr)
 
-        # Run evaluation
+        # optional one-batch dry pass
+        try:
+            xb, yb = next(iter(loader))
+            print(f"test loader: {len(ds)} images | batch={args.batch_size} | xb={tuple(xb.shape)} yb={tuple(yb.shape)}")
+        except StopIteration:
+            print("[warn] test loader is empty (no images found).", file=sys.stderr)
+
+        # run evaluation
         metrics = evaluate(model, loader, dev)
         print(f"eval: n={metrics['n']} | acc={metrics['acc']:.3f} | f1_macro={metrics['f1']:.3f}")
 
+    # ----- unlabeled inference path -----
+    if args.images is not None:
+        infer_loader = build_infer_loader(args.images, args.batch_size, args.num_workers, dev)
+        n = len(infer_loader.dataset)
+        if n == 0:
+            print(f"[warn] no images found under: {args.images}", file=sys.stderr)
+        else:
+            print(f"infer: {n} images found under {args.images}")
+            infer_images(model, infer_loader, dev, list(args.classes))
 
     return 0
 
