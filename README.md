@@ -7,8 +7,7 @@ Compact baseline classifier for **with_mask / without_mask** built with PyTorch 
 - `src/test.py` — two modes:
   - **Evaluate** labeled folders (`--test-dir`): prints **accuracy + macro F1**
   - **Infer** unlabeled images (`--images`): prints `path -> predicted class`
-
-> Note: per-class reports/confusion matrix and webcam streaming are **not** included in this version.
+- `src/webcam.py` — **real-time** webcam/video inference using OpenCV face detection + temporal smoothing
 
 ---
 
@@ -17,12 +16,16 @@ Compact baseline classifier for **with_mask / without_mask** built with PyTorch 
 src/
   train.py
   test.py
+  webcam.py
   models/
     __init__.py
     factory.py          # shared model builder (MobileNetV2 + replaced head)
 data/
   train/  with_mask/, without_mask/
   val/    with_mask/, without_mask/
+  test/   with_mask/, without_mask/
+  raw/    with_mask/, without_mask/
+  infer/
 models/                   # weights/artifacts (gitignored)
 requirements.txt
 README.md
@@ -58,7 +61,7 @@ pip install -r requirements.txt
 ```
 > CUDA note (PyTorch wheels): install Torch per your CUDA. Example for CUDA 12.6:
 ```bash
-> pip install --index-url https://download.pytorch.org/whl/cu126 torch torchvision
+pip install --index-url https://download.pytorch.org/whl/cu126 torch torchvision
 ```
 ---
 
@@ -160,6 +163,7 @@ torchvision
 numpy
 tqdm
 Pillow
+opencv-python
 
 > If you later add per-class reports with scikit-learn, also install:
 > scikit-learn
