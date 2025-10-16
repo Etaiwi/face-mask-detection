@@ -121,6 +121,23 @@ data/infer/folder/photo2.png -> without_mask
 ```
 ---
 
+## Webcam (real-time inference)
+
+Run the classifier on live webcam/video using OpenCV face detection (Haar cascade).  
+Add `opencv-python` to your `requirements.txt`.
+
+```bash
+python src/webcam.py \
+  --weights models/best_mobilenetv2.pt \
+  --classes with_mask without_mask \
+  --img-size 224 \
+  --source 0 \
+  --flip \
+  --conf 0.6 \
+  --smooth 5
+```
+---
+
 ## Tips & notes
 
 - Windows workers: start with `--num-workers 0`.
