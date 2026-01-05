@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import numpy as np
 from PIL import Image
+
 from models.factory import build_model
 from transforms import build_eval_transform
 from config import (
@@ -18,6 +19,14 @@ from config import (
     SEED,
     DEFAULT_WEIGHTS_PATH,
 )
+from utils import (
+    set_seed,
+    device,
+    load_weights,
+    batch_preds,
+    update_running_counts,
+    f1_macro_from_counts,
+)
 
 import warnings; warnings.filterwarnings("ignore", message="Palette images with Transparency")
 
@@ -26,63 +35,6 @@ ROOT = Path(__file__).resolve().parents[1]  # repo root
 DATA = ROOT / "data"
 MODELS_DIR = ROOT / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
-
-# ---- runtime helpers ----
-def set_seed(seed: int = SEED) -> None:
-    """ Set RNG seeds for reproducibility"""
-    random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-def device() -> torch.device:
-    """ Get available device"""
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-def load_weights(model: torch.nn.Module, pt_path: Path, map_location: str = "cpu") -> None:
-    """
-    Load a state_dict from a .pt/.ckpt file.
-    - Supports raw state_dict or wrapped {'state_dict': ...}
-    - Strips 'module.' prefixes (e.g., if trained with DataParallel)
-    - Loads with strict=False and surfaces any mismatches
-    """
-    pt = torch.load(pt_path, map_location=map_location)
-    state = pt.get("state_dict", pt)  # unwrap if needed
-
-    cleaned = {k.replace("module.", "", 1): v for k, v in state.items()}
-    result = model.load_state_dict(cleaned, strict=False)
-
-    missing = getattr(result, "missing_keys", [])
-    unexpected = getattr(result, "unexpected_keys", [])
-    if missing:
-        print(f"[warn] missing keys: {len(missing)} (first 5): {missing[:5]}")
-    if unexpected:
-        print(f"[warn] unexpected keys: {len(unexpected)} (first 5): {unexpected[:5]}")
-
-# --- metrics ----
-def batch_preds(logits: torch.Tensor) -> torch.Tensor:
-    """ Convert model logits to predicted class indices. """
-    return logits.argmax(dim=1)
-
-def update_running_counts(preds, targets, correct, total):
-    """ Update running counts for accuracy calculation. """
-    correct += (preds == targets).sum().item()
-    total += targets.numel()
-    return correct, total
-
-def f1_macro_from_counts(y_true: list[int], y_pred: list[int]) -> float:
-    """ Compute macro F1 from lists of true and predicted class indices."""
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    f1s = []
-    for c in [0, 1]:
-        tp = ((y_true == c) & (y_pred == c)).sum()
-        fp = ((y_true != c) & (y_pred == c)).sum()
-        fn = ((y_true == c) & (y_pred != c)).sum()
-        prec = tp / (tp + fp) if (tp + fp) else 0.0
-        rec = tp / (tp + fn) if (tp + fn) else 0.0
-        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
-        f1s.append(f1)
-    return float(sum(f1s) / len(f1s))
 
 # ---- data ----
 def build_loader(

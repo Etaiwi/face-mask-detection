@@ -22,6 +22,7 @@ from torchvision import datasets, transforms, models
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
+
 from transforms import build_train_val_transforms
 from config import (
     CLASSES,
@@ -30,6 +31,13 @@ from config import (
     IMAGENET_STD,
     SEED,
     DEFAULT_WEIGHTS_PATH,
+)
+from utils import (
+    set_seed,
+    device,
+    batch_preds,
+    update_running_counts,
+    f1_macro_from_counts,
 )
 
 import warnings; warnings.filterwarnings("ignore", message="Palette images with Transparency")
@@ -41,16 +49,6 @@ TRAIN_DIR = DATA / "train"
 VAL_DIR = DATA / "val"
 MODELS_DIR = ROOT / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
-
-# ---- utils ----
-def set_seed(seed: int = SEED) -> None:
-    random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-
-def device() -> torch.device:
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ---- data ----
 def build_loaders(
@@ -105,12 +103,10 @@ def build_criterion() -> nn.Module:
     """ Multi-class classification loss. """
     return nn.CrossEntropyLoss()
 
-
 def build_optimizer(model: nn.Module, lr: float) -> Adam:
     """ Adam over trainable parameters only. """
     params = (p for p in model.parameters() if p.requires_grad)
     return Adam(params, lr=lr)
-
 
 def build_scheduler(optimizer: Adam) -> ReduceLROnPlateau:
     """
@@ -125,38 +121,9 @@ def build_scheduler(optimizer: Adam) -> ReduceLROnPlateau:
         min_lr=1e-6,
     )
 
-
 def current_lr(optimizer: Adam) -> float:
     """ Get current learning rate from optimizer. """
     return optimizer.param_groups[0]["lr"]
-
-# ---- metrics ----
-def batch_preds(logits: torch.Tensor) -> torch.Tensor:
-    """ logits: [B, 2] -> class indices [B]."""
-    return logits.argmax(dim=1)
-
-
-def update_running_counts(preds, targets, correct, total):
-    """ Update running counts for accuracy calculation. """
-    correct += (preds == targets).sum().item()
-    total += targets.numel()
-    return correct, total
-
-
-def f1_macro_from_counts(y_true: list[int], y_pred: list[int]) -> float:
-    """ Compute macro F1 from lists of true and predicted class indices."""
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    f1s = []
-    for c in [0, 1]:
-        tp = ((y_true == c) & (y_pred == c)).sum()
-        fp = ((y_true != c) & (y_pred == c)).sum()
-        fn = ((y_true == c) & (y_pred != c)).sum()
-        prec = tp / (tp + fp) if (tp + fp) else 0.0
-        rec = tp / (tp + fn) if (tp + fn) else 0.0
-        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
-        f1s.append(f1)
-    return float(sum(f1s) / len(f1s))
 
 # ---- logging ----
 def write_csv_header(path: Path) -> None:

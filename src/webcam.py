@@ -8,7 +8,8 @@ import numpy as np
 import torch
 from PIL import Image
 from torchvision import transforms as T
-from models.factory import build_model  # your MobileNetV2 builder
+
+from models.factory import build_model
 from transforms import build_eval_transform
 from config import (
     CLASSES,
@@ -17,23 +18,9 @@ from config import (
     IMAGENET_STD,
     DEFAULT_WEIGHTS_PATH,
 )
+from utils import device, load_weights
 
 # ---- helpers ----
-def device() -> torch.device:
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-def load_weights(model: torch.nn.Module, weights_path: Path, map_location: torch.device) -> None:
-    """
-    Robust loader: supports raw state_dict or wrapped checkpoints; strips 'module.' if present.
-    """
-    state = torch.load(weights_path, map_location=map_location)
-    if isinstance(state, dict):
-        sd = state.get("state_dict", state)
-    else:
-        sd = state
-    new_sd = {k.replace("module.", ""): v for k, v in sd.items()}
-    model.load_state_dict(new_sd, strict=True)
-
 def get_face_detector() -> cv2.CascadeClassifier:
     """
     Built-in OpenCV Haar cascade (zero extra files). Works best with front-facing, decent light.

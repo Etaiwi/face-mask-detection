@@ -3,7 +3,6 @@ from __future__ import annotations
 from torchvision import transforms
 from config import IMG_SIZE, IMAGENET_MEAN, IMAGENET_STD
 
-
 def build_train_val_transforms(img_size: int = IMG_SIZE):
     """
     MobileNetV2-style preprocessing.
