@@ -8,24 +8,24 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import numpy as np
 from PIL import Image
-
 from models.factory import build_model
+from transforms import build_eval_transform
+from config import (
+    CLASSES,
+    IMG_SIZE,
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    SEED,
+    DEFAULT_WEIGHTS_PATH,
+)
 
 import warnings; warnings.filterwarnings("ignore", message="Palette images with Transparency")
-
 
 # ---- config / paths ----
 ROOT = Path(__file__).resolve().parents[1]  # repo root
 DATA = ROOT / "data"
 MODELS_DIR = ROOT / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
-
-CLASSES = ["with_mask", "without_mask"]
-IMG_SIZE = 224
-SEED = 42
-IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD  = [0.229, 0.224, 0.225]
-
 
 # ---- runtime helpers ----
 def set_seed(seed: int = SEED) -> None:
@@ -34,11 +34,9 @@ def set_seed(seed: int = SEED) -> None:
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-
 def device() -> torch.device:
     """ Get available device"""
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 def load_weights(model: torch.nn.Module, pt_path: Path, map_location: str = "cpu") -> None:
     """
@@ -60,19 +58,16 @@ def load_weights(model: torch.nn.Module, pt_path: Path, map_location: str = "cpu
     if unexpected:
         print(f"[warn] unexpected keys: {len(unexpected)} (first 5): {unexpected[:5]}")
 
-
 # --- metrics ----
 def batch_preds(logits: torch.Tensor) -> torch.Tensor:
     """ Convert model logits to predicted class indices. """
     return logits.argmax(dim=1)
-
 
 def update_running_counts(preds, targets, correct, total):
     """ Update running counts for accuracy calculation. """
     correct += (preds == targets).sum().item()
     total += targets.numel()
     return correct, total
-
 
 def f1_macro_from_counts(y_true: list[int], y_pred: list[int]) -> float:
     """ Compute macro F1 from lists of true and predicted class indices."""
@@ -89,18 +84,7 @@ def f1_macro_from_counts(y_true: list[int], y_pred: list[int]) -> float:
         f1s.append(f1)
     return float(sum(f1s) / len(f1s))
 
-
 # ---- data ----
-def build_transforms(img_size: int = IMG_SIZE):
-    """ Deterministic eval transforms: RGB -> resize -> tensor -> normalize. """
-    return transforms.Compose([
-        transforms.Lambda(lambda im: im.convert("RGB")),
-        transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-    ])
-
-
 def build_loader(
         data_dir: Path,
         batch: int,
@@ -108,11 +92,10 @@ def build_loader(
         dev: torch.device,
 ) -> DataLoader:
     """ Build DataLoader for eval/inference. """
-    tfms = build_transforms(IMG_SIZE)
+    tfms = build_eval_transform(img_size=IMG_SIZE)
     ds = datasets.ImageFolder(data_dir, transform=tfms)
     pin = (dev.type == "cuda")
     return DataLoader(ds, batch_size=batch, shuffle=False, num_workers=workers, pin_memory=pin)
-
 
 class ImageFolderFlat(torch.utils.data.Dataset):
     """
@@ -135,13 +118,11 @@ class ImageFolderFlat(torch.utils.data.Dataset):
         img = self.transform(img)
         return img, str(path)
 
-
 def build_infer_loader(images_dir: Path, batch: int, workers: int, dev: torch.device) -> DataLoader:
-    tfms = build_transforms(IMG_SIZE)  # reuse your eval transforms
+    tfms = build_eval_transform(img_size=IMG_SIZE)
     ds = ImageFolderFlat(images_dir, transform=tfms)
     pin = (dev.type == "cuda")
     return DataLoader(ds, batch_size=batch, shuffle=False, num_workers=workers, pin_memory=pin)
-
 
 # ---- loops ----
 @torch.no_grad()
@@ -165,7 +146,6 @@ def evaluate(model: torch.nn.Module, loader: DataLoader, dev: torch.device) -> d
     f1  = f1_macro_from_counts(y_true, y_pred)  # import from utils or sklearn
     return {"n": total, "acc": acc, "f1": f1}
 
-
 @torch.no_grad()
 def infer_images(model: torch.nn.Module, loader: DataLoader, dev: torch.device, class_names: list[str]) -> None:
     model.eval()
@@ -176,20 +156,18 @@ def infer_images(model: torch.nn.Module, loader: DataLoader, dev: torch.device, 
         for p, path in zip(preds, paths):
             print(f"{path} -> {class_names[p]}")
 
-
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Evaluate/Infer face-mask classifier")
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--test-dir", type=Path, help="Labeled test/val directory")
     src.add_argument("--images", type=Path, help="Unlabeled images folder for inference")
-    p.add_argument("--weights", type=Path, default=MODELS_DIR / "best_mobilenetv2.pt", help="Path to model weights (.pt/.ckpt)")
+    p.add_argument("--weights", type=Path, default=DEFAULT_WEIGHTS_PATH, help="Path to model weights (.pt/.ckpt)")
     p.add_argument("--classes", nargs="+", default=CLASSES ,help="Class names in training order")
     p.add_argument("--img-size", type=int, default=IMG_SIZE)
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--num-workers", type=int, default=0)
     return p
-
 
 # ---- main ----
 def main(argv: list[str] | None = None) -> int:
@@ -255,7 +233,6 @@ def main(argv: list[str] | None = None) -> int:
             infer_images(model, infer_loader, dev, list(args.classes))
 
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

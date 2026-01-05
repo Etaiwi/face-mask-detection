@@ -3,36 +3,24 @@ import argparse
 from pathlib import Path
 import sys
 from collections import deque
-
 import cv2
 import numpy as np
 import torch
 from PIL import Image
 from torchvision import transforms as T
-
 from models.factory import build_model  # your MobileNetV2 builder
-
-
-# ---- defaults ----
-CLASSES = ["with_mask", "without_mask"]
-IMG_SIZE = 224
-IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD  = [0.229, 0.224, 0.225]
-
+from transforms import build_eval_transform
+from config import (
+    CLASSES,
+    IMG_SIZE,
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    DEFAULT_WEIGHTS_PATH,
+)
 
 # ---- helpers ----
 def device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def build_transforms(img_size: int = IMG_SIZE) -> T.Compose:
-    return T.Compose([
-        T.Lambda(lambda im: im.convert("RGB")),
-        T.Resize((img_size, img_size)),
-        T.ToTensor(),
-        T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-    ])
-
 
 def load_weights(model: torch.nn.Module, weights_path: Path, map_location: torch.device) -> None:
     """
@@ -46,7 +34,6 @@ def load_weights(model: torch.nn.Module, weights_path: Path, map_location: torch
     new_sd = {k.replace("module.", ""): v for k, v in sd.items()}
     model.load_state_dict(new_sd, strict=True)
 
-
 def get_face_detector() -> cv2.CascadeClassifier:
     """
     Built-in OpenCV Haar cascade (zero extra files). Works best with front-facing, decent light.
@@ -56,7 +43,6 @@ def get_face_detector() -> cv2.CascadeClassifier:
     if clf.empty():
         raise RuntimeError("Failed to load Haar cascade for face detection")
     return clf
-
 
 def crop_largest_face(frame_bgr: np.ndarray, face_clf: cv2.CascadeClassifier):
     """
@@ -74,7 +60,6 @@ def crop_largest_face(frame_bgr: np.ndarray, face_clf: cv2.CascadeClassifier):
     y2 = min(frame_bgr.shape[0], y + h + pad)
     return frame_bgr[y1:y2, x1:x2], (x1, y1, x2, y2)
 
-
 def preprocess_bgr(frame_bgr: np.ndarray, tfm: T.Compose) -> torch.Tensor:
     """
     BGR (OpenCV) -> RGB PIL -> normalized tensor [1,3,H,W]
@@ -84,11 +69,10 @@ def preprocess_bgr(frame_bgr: np.ndarray, tfm: T.Compose) -> torch.Tensor:
     x = tfm(im).unsqueeze(0)
     return x
 
-
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Real-time webcam inference for face-mask classifier")
-    p.add_argument("--weights", type=Path, required=True, help="Path to model weights (.pt)")
+    p.add_argument("--weights", type=Path, default=DEFAULT_WEIGHTS_PATH, help="Path to model weights (.pt)")
     p.add_argument("--classes", nargs="+", default=CLASSES, help="Class names in training order")
     p.add_argument("--img-size", type=int, default=IMG_SIZE)
 
@@ -102,7 +86,6 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--conf", type=float, default=0.0, help="Confidence threshold for labeling (0..1)")
     p.add_argument("--smooth", type=int, default=5, help="Temporal smoothing window (frames, 0=off)")
     return p
-
 
 # ---- main ----
 def main(argv: list[str] | None = None) -> int:
@@ -122,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     model.eval()
 
     # transforms & detector
-    tfm = build_transforms(args.img_size)
+    tfm = build_eval_transform(img_size=args.img_size)
     face_clf = get_face_detector()
 
     # capture
@@ -185,7 +168,6 @@ def main(argv: list[str] | None = None) -> int:
     cap.release()
     cv2.destroyAllWindows()
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

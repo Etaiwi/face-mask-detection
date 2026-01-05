@@ -8,7 +8,6 @@ Train a MobileNetV2 baseline model for face-mask detection.
 """
 
 from __future__ import annotations
-
 from pathlib import Path
 import argparse
 import random
@@ -16,18 +15,24 @@ import sys
 import numpy as np
 import time
 import json
-
 import torch
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from torchvision import datasets, transforms, models
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-
 from tqdm import tqdm
+from transforms import build_train_val_transforms
+from config import (
+    CLASSES,
+    IMG_SIZE,
+    IMAGENET_MEAN,
+    IMAGENET_STD,
+    SEED,
+    DEFAULT_WEIGHTS_PATH,
+)
 
 import warnings; warnings.filterwarnings("ignore", message="Palette images with Transparency")
-
 
 # ---- config / paths ----
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,14 +41,6 @@ TRAIN_DIR = DATA / "train"
 VAL_DIR = DATA / "val"
 MODELS_DIR = ROOT / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
-
-CLASSES = ["with_mask", "without_mask"]
-
-IMAGENET_MEAN = [0.485, 0.456, 0.406]
-IMAGENET_STD = [0.229, 0.224, 0.225]
-IMG_SIZE = 224
-SEED = 42
-
 
 # ---- utils ----
 def set_seed(seed: int = SEED) -> None:
@@ -55,31 +52,7 @@ def set_seed(seed: int = SEED) -> None:
 def device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
 # ---- data ----
-def build_transforms(img_size: int = IMG_SIZE):
-    """
-    MobileNetV2-style preprocessing.
-    Train: light augmentation (flip) + normalize.
-    Val: deterministic transform + normalize.
-    """
-    train_tfms = transforms.Compose([
-        transforms.Lambda(lambda im: im.convert("RGB")),
-        transforms.Resize((img_size, img_size)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.ToTensor(),
-        transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-    ])
-
-    val_tfms = transforms.Compose([
-        transforms.Lambda(lambda im: im.convert("RGB")),
-        transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-    ])
-    return train_tfms, val_tfms
-
-
 def build_loaders(
         train_dir: Path,
         val_dir: Path,
@@ -87,7 +60,7 @@ def build_loaders(
         workers: int,
         dev: torch.device,
 ):
-    train_tfms, val_tfms = build_transforms()
+    train_tfms, val_tfms = build_train_val_transforms(img_size=IMG_SIZE)
 
     train_ds = datasets.ImageFolder(train_dir, transform=train_tfms)
     val_ds = datasets.ImageFolder(val_dir, transform=val_tfms)
@@ -112,7 +85,6 @@ def build_loaders(
 
     return train_loader, val_loader
 
-
 # ---- model ----
 def build_model(num_classes: int = 2, freeze_backbone: bool = False) -> torch.nn.Module:
     """ Load pretrained MobileNetV2 and replace the classifier head for num_classes. """
@@ -127,7 +99,6 @@ def build_model(num_classes: int = 2, freeze_backbone: bool = False) -> torch.nn
             p.requires_grad = False
     
     return model
-
 
 # ---- optim ----
 def build_criterion() -> nn.Module:
@@ -159,7 +130,6 @@ def current_lr(optimizer: Adam) -> float:
     """ Get current learning rate from optimizer. """
     return optimizer.param_groups[0]["lr"]
 
-
 # ---- metrics ----
 def batch_preds(logits: torch.Tensor) -> torch.Tensor:
     """ logits: [B, 2] -> class indices [B]."""
@@ -188,7 +158,6 @@ def f1_macro_from_counts(y_true: list[int], y_pred: list[int]) -> float:
         f1s.append(f1)
     return float(sum(f1s) / len(f1s))
 
-
 # ---- logging ----
 def write_csv_header(path: Path) -> None:
     if not path.exists():
@@ -204,7 +173,6 @@ def append_csv_row(path: Path, row: dict) -> None:
             f"{row['val_loss']:.6f},{row['val_acc']:.6f},{row['val_f1']:.6f},"
             f"{row['lr']:.2e},{row['time_s']:.3f}\n"
         )
-
 
 # ---- loops ----
 def train_one_epoch(
@@ -258,7 +226,6 @@ def train_one_epoch(
     f1 = f1_macro_from_counts(y_true, y_pred)
     return {"loss": avg_loss, "acc": acc, "f1": f1}
 
-
 @torch.no_grad()
 def evaluate(
     model: torch.nn.Module,
@@ -299,7 +266,6 @@ def evaluate(
     f1 = f1_macro_from_counts(y_true, y_pred)
     return {"loss": avg_loss, "acc": acc, "f1": f1}
 
-
 # ---- argparse ----
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser("Train baseline face-mask classifier")
@@ -309,11 +275,10 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--num-workers", type=int, default=0)  # safe default on Windows
     p.add_argument("--train-dir", type=Path, default=TRAIN_DIR)
     p.add_argument("--val-dir", type=Path, default=VAL_DIR)
-    p.add_argument("--out", type=Path, default=MODELS_DIR / "best_mobilenetv2.pt")
+    p.add_argument("--out", type=Path, default=DEFAULT_WEIGHTS_PATH, help="Where to save best model weights.",)
     p.add_argument("--freeze-backbone", action="store_true")
     p.add_argument("--log-csv", type=Path, default=MODELS_DIR / "train_log.csv")
     return p
-
 
 # ---- main ----
 def main(argv: list[str] | None = None) -> int:
@@ -393,7 +358,6 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"best val F1: {best_f1:.3f} | saved to: {args.out}")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
