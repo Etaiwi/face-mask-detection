@@ -3,7 +3,7 @@ from pathlib import Path
 
 # ---- Classes ----
 # Internal class names used in code.
-CLASSES = ("with_mask", "without_mask")
+CLASSES = ("WithMask", "WithoutMask")
 
 # ---- Image / preprocessing ----
 IMG_SIZE = 224
