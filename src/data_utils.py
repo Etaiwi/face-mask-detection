@@ -46,7 +46,7 @@ def check_image_ok(p: Path) -> bool:
 def inventory(root: Path) -> dict[str, int]:
     """
     Count images by parent folder name under root.
-    Returns a dict like {"WithMask": 1234, "WithoutMask": 1311}.
+    Returns a dict like {"with_mask": 1234, "without_mask": 1311}.
     """
     counts: dict[str, int] = {}
     for p in iter_images(root):

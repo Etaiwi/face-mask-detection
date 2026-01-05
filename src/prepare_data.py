@@ -25,7 +25,7 @@ OUT_DIRS = {
     "val": Path("data/val"),
     "test": Path("data/test"),
 }
-CLASSES = ["WithMask", "WithoutMask"]
+CLASSES = ["with_mask", "without_mask"]
 RNG_SEED = 42
 
 

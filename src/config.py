@@ -2,8 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 
 # ---- Classes ----
-# Internal class names used in code.
-CLASSES = ("WithMask", "WithoutMask")
+CLASSES = ("with_mask", "without_mask")
 
 # ---- Image / preprocessing ----
 IMG_SIZE = 224
