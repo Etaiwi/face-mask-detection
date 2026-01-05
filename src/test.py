@@ -9,7 +9,7 @@ from torchvision import datasets, transforms
 import numpy as np
 from PIL import Image
 
-from models.factory import build_model
+from model_factory import build_model
 from transforms import build_eval_transform
 from config import (
     CLASSES,
