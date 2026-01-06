@@ -3,21 +3,24 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
-ENV PORT=8080
+ENV PORT=7860
+
+# System deps (opencv headless sometimes needs these)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Needed for opencv-python-headless
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 libsm6 libxrender1 libxext6 \
-  && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
+# Install python deps first (better caching)
+COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
-RUN echo "Models dir:" && ls -la /app/models || true
+# Copy the rest of the app
+COPY . /app
 
-EXPOSE 8080
+# HF Spaces expects port 7860
+EXPOSE 7860
 
-CMD ["bash", "-c", "streamlit run src/app.py --server.port=${PORT} --server.address=0.0.0.0"]
+# Streamlit must bind to 0.0.0.0 and port 7860
+CMD ["streamlit", "run", "src/app.py", "--server.address=0.0.0.0", "--server.port=${PORT}"]
