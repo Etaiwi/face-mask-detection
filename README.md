@@ -1,3 +1,14 @@
+---
+title: Face Mask Detection
+emoji: 🧾
+colorFrom: blue
+colorTo: red
+sdk: docker
+sdk_version: "3.11"
+app_file: src/app.py
+pinned: false
+---
+
 # Face Mask Detection — Computer Vision Demo
 
 A lightweight computer vision application for detecting whether a person is wearing a face mask, built with PyTorch and MobileNetV2 and deployed as an interactive web demo.
