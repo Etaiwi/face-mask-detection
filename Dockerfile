@@ -23,4 +23,4 @@ COPY . .
 EXPOSE 7860
 
 # Streamlit must bind to 0.0.0.0 and port 7860
-CMD ["sh", "-c", "streamlit run src/app.py --server.address=0.0.0.0 --server.port=${PORT}"]
+CMD ["sh", "-c", "streamlit run src/app.py --server.address=0.0.0.0 --server.port=${PORT} --server.enableCORS=false --server.enableXsrfProtection=false --server.maxUploadSize=50"]
