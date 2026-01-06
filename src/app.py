@@ -58,6 +58,7 @@ def main():
 
     # Ensure weights exist (auto-download from GitHub Release if missing)
     try:
+        st.info("Preparing model weights...")
         progress = st.progress(0, text="Checking model weights...")
         last_pct = {"v": 0}
 
@@ -76,8 +77,10 @@ def main():
             progress_cb=on_progress,
         )
         progress.empty()
+        st.success("Model weights ready!")
     except Exception as e:
         st.error(f"Failed to prepare model weights: {e}")
+        st.error("Please check your internet connection and try again.")
         st.stop()
 
     model, device = load_model(DEFAULT_WEIGHTS_PATH)
