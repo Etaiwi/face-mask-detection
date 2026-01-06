@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the app
 COPY . /app
+RUN echo "Contents of /app:" && ls -la /app && echo "Contents of /app/models:" && ls -la /app/models || echo "models dir not found"
 
 # HF Spaces expects port 7860
 EXPOSE 7860
