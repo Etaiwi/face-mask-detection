@@ -16,11 +16,8 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy model files first (ensure they exist)
-COPY models/ /app/models/
-
-# Copy the rest of the app
-COPY . /app
+# Copy everything (including models)
+COPY . .
 
 # Debug: check what was copied
 RUN echo "Contents of /app:" && ls -la /app && echo "Contents of /app/models:" && ls -la /app/models || echo "models dir not found"
