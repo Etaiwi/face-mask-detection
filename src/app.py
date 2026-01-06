@@ -102,6 +102,14 @@ def main():
             help="Use your device camera to take a photo.",
         )
 
+    # Debug the inputs
+    st.write(f"DEBUG: uploaded_file is None: {uploaded_file is None}")
+    st.write(f"DEBUG: camera_image is None: {camera_image is None}")
+    if camera_image is not None:
+        st.write(f"DEBUG: camera_image type: {type(camera_image)}")
+    if uploaded_file is not None:
+        st.write(f"DEBUG: uploaded_file type: {type(uploaded_file)}")
+
     image_source = None
     source_label = None
 
@@ -109,9 +117,11 @@ def main():
         # Prefer camera image if provided
         image_source = camera_image
         source_label = "camera"
+        st.write("DEBUG: Using camera image")
     elif uploaded_file is not None:
         image_source = uploaded_file
         source_label = "upload"
+        st.write("DEBUG: Using uploaded file")
 
     if image_source is None:
         st.info("👆 Upload an image or capture from your camera to get a prediction.")
