@@ -17,3 +17,7 @@ SEED = 42
 ROOT_DIR = Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT_DIR / "models"
 DEFAULT_WEIGHTS_PATH = MODELS_DIR / "best_mobilenetv2.pt"
+
+# ---- Model weights download (GitHub Release) ----
+WEIGHTS_URL = "https://github.com/Etaiwi/face-mask-detection/releases/download/v1.0.0/best_mobilenetv2.pt"
+WEIGHTS_SHA256 = None  # optional: add later for integrity

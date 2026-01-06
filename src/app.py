@@ -8,11 +8,9 @@ from PIL import Image
 
 from model_factory import build_model
 from transforms import build_eval_transform
-from config import (
-    CLASSES,
-    IMG_SIZE,
-    DEFAULT_WEIGHTS_PATH,
-)
+from weights import ensure_weights
+from config import CLASSES, IMG_SIZE, DEFAULT_WEIGHTS_PATH, WEIGHTS_URL, WEIGHTS_SHA256
+
 # --- Config / constants (keep in sync with train/test) ---
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,13 +56,29 @@ def main():
         "The model will predict whether the person is **with_mask** or **without_mask**."
     )
 
-    # Check weights exist
-    if not DEFAULT_WEIGHTS_PATH.exists():
-        st.error(
-            f"Model weights not found at `{DEFAULT_WEIGHTS_PATH}`.\n\n"
-            "Place your `best_mobilenetv2.pt` file in the `models/` folder."
+    # Ensure weights exist (auto-download from GitHub Release if missing)
+    try:
+        progress = st.progress(0, text="Checking model weights...")
+        last_pct = {"v": 0}
+
+        def on_progress(downloaded: int, total: int):
+            if total <= 0:
+                return
+            pct = int(min(100, (downloaded / total) * 100))
+            if pct != last_pct["v"]:
+                last_pct["v"] = pct
+                progress.progress(pct, text=f"Downloading model weights... {pct}%")
+
+        ensure_weights(
+            DEFAULT_WEIGHTS_PATH,
+            url=WEIGHTS_URL,
+            expected_sha256=WEIGHTS_SHA256,
+            progress_cb=on_progress,
         )
-        return
+        progress.empty()
+    except Exception as e:
+        st.error(f"Failed to prepare model weights: {e}")
+        st.stop()
 
     model, device = load_model(DEFAULT_WEIGHTS_PATH)
     st.caption(f"Running on device: `{device}`")
