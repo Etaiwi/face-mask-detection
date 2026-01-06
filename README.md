@@ -13,7 +13,7 @@ pinned: false
 A lightweight computer vision application for detecting whether a person is wearing a face mask, built with PyTorch and MobileNetV2 and deployed as an interactive web demo.
 
 🔗 **Live Demo:**
-[Deployed on Hugging Face Spaces]
+https://huggingface.co/spaces/Etaiwi/face-mask-detection
 
 ---
 
