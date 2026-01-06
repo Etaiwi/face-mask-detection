@@ -16,11 +16,8 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy everything (including models)
+# Copy everything (models will be downloaded at runtime if missing)
 COPY . .
-
-# Debug: check what was copied
-RUN echo "Contents of /app:" && ls -la /app && echo "Contents of /app/models:" && ls -la /app/models || echo "models dir not found"
 
 # HF Spaces expects port 7860
 EXPOSE 7860
