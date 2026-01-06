@@ -2,8 +2,8 @@
 
 A lightweight computer vision application for detecting whether a person is wearing a face mask, built with PyTorch and MobileNetV2 and deployed as an interactive web demo.
 
-🔗 **Live Demo (Google Cloud Run):**  
-https://face-mask-detection-385217468790.us-central1.run.app
+🔗 **Live Demo:**
+[Deployed on Hugging Face Spaces]
 
 ---
 
@@ -25,7 +25,7 @@ The demo allows users to upload an image or capture one from their camera and re
 - **Input:** RGB face images, resized to 224×224
 - **Classes:** `with_mask`, `without_mask`
 - **Preprocessing:** ImageNet normalization
-- **Deployment:** Streamlit app running on Google Cloud Run
+- **Deployment:** Streamlit app containerized for cloud deployment
 
 Model weights are **automatically downloaded** from GitHub Releases on first run if not present locally.
 
@@ -83,7 +83,7 @@ On first run, the model weights will be downloaded automatically.
 
 - The model performs well on benchmark data but may be sensitive to real-world variations (lighting, occlusion, camera angle).
 - This project focuses on **inference and deployment**, not face detection or tracking.
-- The Cloud Run service uses CPU-only inference for cost efficiency.
+- The application uses CPU-only inference for broad compatibility.
 
 ---
 
