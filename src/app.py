@@ -82,10 +82,8 @@ def main():
 
     model, device = load_model(DEFAULT_WEIGHTS_PATH)
     st.caption(f"Running on device: `{device}`")
-    st.write(f"DEBUG: Model loaded from {DEFAULT_WEIGHTS_PATH}")
 
     st.subheader("1. Provide an image")
-    st.write("DEBUG: Starting image input section")
 
     col1, col2 = st.columns(2)
 
@@ -102,14 +100,6 @@ def main():
             help="Use your device camera to take a photo.",
         )
 
-    # Debug the inputs
-    st.write(f"DEBUG: uploaded_file is None: {uploaded_file is None}")
-    st.write(f"DEBUG: camera_image is None: {camera_image is None}")
-    if camera_image is not None:
-        st.write(f"DEBUG: camera_image type: {type(camera_image)}")
-    if uploaded_file is not None:
-        st.write(f"DEBUG: uploaded_file type: {type(uploaded_file)}")
-
     image_source = None
     source_label = None
 
@@ -117,18 +107,13 @@ def main():
         # Prefer camera image if provided
         image_source = camera_image
         source_label = "camera"
-        st.write("DEBUG: Using camera image")
     elif uploaded_file is not None:
         image_source = uploaded_file
         source_label = "upload"
-        st.write("DEBUG: Using uploaded file")
 
     if image_source is None:
         st.info("👆 Upload an image or capture from your camera to get a prediction.")
-        st.write("DEBUG: No image selected yet")
         return
-
-    st.write(f"DEBUG: Image selected from {source_label}")
 
     # Load the image from the selected source
     if source_label == "camera":
@@ -137,12 +122,9 @@ def main():
         bytes_data = image_source.read()
 
     img = Image.open(io.BytesIO(bytes_data))
-    st.write("DEBUG: Image loaded successfully")
 
     st.subheader("2. Preview")
     st.image(img, caption=f"Input image ({source_label})", width='content')
-
-    st.write("DEBUG: Model loaded successfully, ready for prediction")
 
     if st.button("Run prediction"):
         with st.spinner("Running model..."):
