@@ -85,6 +85,7 @@ def main():
     st.write(f"DEBUG: Model loaded from {DEFAULT_WEIGHTS_PATH}")
 
     st.subheader("1. Provide an image")
+    st.write("DEBUG: Starting image input section")
 
     col1, col2 = st.columns(2)
 
@@ -114,7 +115,10 @@ def main():
 
     if image_source is None:
         st.info("👆 Upload an image or capture from your camera to get a prediction.")
+        st.write("DEBUG: No image selected yet")
         return
+
+    st.write(f"DEBUG: Image selected from {source_label}")
 
     # Load the image from the selected source
     if source_label == "camera":
@@ -123,6 +127,7 @@ def main():
         bytes_data = image_source.read()
 
     img = Image.open(io.BytesIO(bytes_data))
+    st.write("DEBUG: Image loaded successfully")
 
     st.subheader("2. Preview")
     st.image(img, caption=f"Input image ({source_label})", width='content')
