@@ -3,6 +3,6 @@ torchvision
 numpy
 tqdm
 Pillow
-opencv-python
+opencv-python-headless
 streamlit
 # scikit-learn  # add only if you actually use it in reports
